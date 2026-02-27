@@ -64,6 +64,7 @@ try:
     CORS(app, origins=[
         "http://localhost:3000",
         "https://compass-two-iota.vercel.app",
+        "https://compaass.vercel.app",
     ], supports_credentials=True)
     print("[app] CORS enabled for Next.js frontend.")
 except ImportError:
