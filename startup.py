@@ -14,6 +14,7 @@ import sys
 
 MODEL_DIR = os.getenv("MODEL_DIR", "./distilbert_finetuned")
 HF_REPO   = os.getenv("HF_MODEL_REPO", "")
+HF_TOKEN  = os.getenv("HF_TOKEN", "")   # Required when model repo is private
 
 def download_model():
     """Download model from HuggingFace Hub if not already present locally."""
@@ -36,11 +37,13 @@ def download_model():
             repo_id=HF_REPO,
             local_dir=MODEL_DIR,
             local_dir_use_symlinks=False,
+            token=HF_TOKEN if HF_TOKEN else None,
         )
         print(f"[startup] ✅ Model downloaded to {MODEL_DIR}")
     except Exception as e:
         print(f"[startup] ❌ Model download failed: {e}")
         sys.exit(1)   # Fail loudly so Render shows the error
+
 
 
 def download_spacy():

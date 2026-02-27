@@ -18,7 +18,9 @@ services:
 
       # ── HuggingFace Hub (model download at startup) ───────────────────────
       - key: HF_MODEL_REPO
-        value: "" # ← set this to your HF repo after uploading
+        value: "Oheha/compass-emotion-classifier"
+      - key: HF_TOKEN
+        sync: false # ← set via Render dashboard (secret)
 
       # ── Groq LLM ─────────────────────────────────────────────────────────
       - key: GROQ_API_KEY
