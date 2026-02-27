@@ -1,0 +1,78 @@
+services:
+  # ── Flask / Gunicorn backend ─────────────────────────────────────────────
+  - type: web
+    name: compass-backend
+    runtime: python
+    buildCommand: pip install -r requirements.txt && python -m spacy download en_core_web_sm && python startup.py
+    startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --workers 2 --timeout 120
+    plan: free
+
+    envVars:
+      # ── Model ────────────────────────────────────────────────────────────────
+      - key: MODEL_DIR
+        value: ./distilbert_finetuned
+      - key: USE_ONNX
+        value: "false"
+      - key: LABELS_PATH
+        value: ./label_classes.json
+
+      # ── HuggingFace Hub (model download at startup) ───────────────────────
+      - key: HF_MODEL_REPO
+        value: "" # ← set this to your HF repo after uploading
+
+      # ── Groq LLM ─────────────────────────────────────────────────────────
+      - key: GROQ_API_KEY
+        sync: false # ← set via Render dashboard (secret)
+      - key: GROQ_MODEL
+        value: llama-3.1-8b-instant
+
+      # ── MongoDB ───────────────────────────────────────────────────────────
+      - key: MONGO_URI
+        sync: false # ← set via Render dashboard (secret)
+      - key: MONGO_DB_NAME
+        value: mental_health_chatbot
+      - key: MONGO_COLLECTION
+        value: conversations
+
+      # ── Redis (auto-injected from the Redis service below) ───────────────
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: compass-redis
+          property: connectionString
+      - key: REDIS_MAX_CONNECTIONS
+        value: "20"
+      - key: SESSION_TTL_SECONDS
+        value: "1800"
+      - key: PREDICTION_CACHE_TTL
+        value: "60"
+
+      # ── Flask ─────────────────────────────────────────────────────────────
+      - key: FLASK_ENV
+        value: production
+      - key: SECRET_KEY
+        generateValue: true # Render generates a secure random value
+      - key: PORT
+        value: "10000"
+
+      # ── NLP ───────────────────────────────────────────────────────────────
+      - key: SPACY_MODEL
+        value: en_core_web_sm
+      - key: CONFIDENCE_THRESHOLD
+        value: "0.55"
+      - key: MAX_INPUT_LENGTH
+        value: "512"
+      - key: MAX_RAW_CHARS
+        value: "1000"
+
+      # ── Rate limiting ─────────────────────────────────────────────────────
+      - key: RATE_LIMIT_REQUESTS
+        value: "30"
+      - key: RATE_LIMIT_WINDOW_SECONDS
+        value: "60"
+
+  # ── Redis (free tier) ────────────────────────────────────────────────────
+  - type: redis
+    name: compass-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru

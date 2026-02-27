@@ -1,0 +1,55 @@
+# ── Secrets (NEVER commit these) ─────────────────────────────────────────────
+.env
+*.env
+!.env.example
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg
+*.egg-info/
+.eggs/
+dist/
+build/
+.installed.cfg
+pip-selfcheck.json
+
+# ── Virtual environments ───────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+ENV/
+
+# ── Testing ───────────────────────────────────────────────────────────────────
+.pytest_cache/
+.coverage
+htmlcov/
+*.log
+
+# ── ML Models (large binary files — use Git LFS or external storage) ──────────
+# Comment these out if you WANT to commit the model weights
+distilbert_finetuned/
+onnx_model/
+*.onnx
+*.bin
+*.pt
+*.pth
+
+# ── Data ──────────────────────────────────────────────────────────────────────
+# Raw datasets — download via download_dataset.py instead
+data/
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# ── OS ────────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Frontend (has its own repo — COMPASS) ────────────────────────────────────
+frontend/
