@@ -76,3 +76,4 @@ services:
     name: compass-redis
     plan: free
     maxmemoryPolicy: allkeys-lru
+    ipAllowList: [] # empty = no external access; web service connects internally
