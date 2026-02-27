@@ -12,7 +12,9 @@ services:
       - key: MODEL_DIR
         value: ./distilbert_finetuned
       - key: USE_ONNX
-        value: "false"
+        value: "true"
+      - key: ONNX_MODEL_PATH
+        value: ./distilbert_finetuned/onnx_model/model_quantized.onnx
       - key: LABELS_PATH
         value: ./label_classes.json
 

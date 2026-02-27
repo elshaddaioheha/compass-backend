@@ -10,7 +10,11 @@ flask==3.0.3
 flask-cors==4.0.1
 gunicorn==22.0.0
 
+# ── ONNX Runtime (primary inference engine — ~30MB, no GPU needed) ────────────
+onnxruntime==1.18.0
+
 # ── NLP / ML ──────────────────────────────────────────────────────────────────
+# torch is kept as fallback only. On Render free tier, USE_ONNX=true skips PyTorch.
 transformers==4.41.2
 torch==2.3.1+cpu          # CPU-only build — smaller, faster to install on Render
 spacy==3.7.5
