@@ -130,9 +130,9 @@ def generate_reply(
     # Build message list for the API
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
 
-    # Inject last 5 history turns (keep context window small for speed)
+    # Inject last 4 history turns (keep context window small for speed)
     if history:
-        messages.extend(history[-10:])   # up to 5 user+assistant pairs
+        messages.extend(history[-4:])   # up to 2 user+assistant pairs
 
     # Append the current user message, annotated with emotion context
     guidance = _EMOTION_GUIDANCE.get(emotion, _EMOTION_GUIDANCE["neutral"])

@@ -55,9 +55,9 @@ from utils.logger import log_prediction, log_error, log_request
 # Single DialogueManager instance — stateless, safe to share
 _dm = DialogueManager()
 
-# In-process conversation history per user (last 10 turns = 5 exchanges)
+# In-process conversation history per user (last 4 turns = 2 exchanges)
 _history: dict[str, list] = defaultdict(list)
-_MAX_HISTORY_TURNS = 10
+_MAX_HISTORY_TURNS = 4
 
 # ── Startup: confirm LLM status ───────────────────────────────────────────────
 _groq_key = os.getenv("GROQ_API_KEY", "")
