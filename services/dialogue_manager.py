@@ -315,6 +315,8 @@ class DialogueManager:
         state["last_confidence"] = confidence
         state["last_message"] = message
         state["turn_count"] = state.get("turn_count", 0) + 1
+        state["crisis_flag"] = False
+        state.pop("crisis_triggered_by", None)
 
         if entities:
             state["last_entities"] = entities
@@ -357,8 +359,9 @@ class DialogueManager:
         confidence = state.get("last_confidence", 0.0)
 
         # ── 1. Crisis check (highest priority) ────────────────────────────
+        forced_crisis = bool(state.get("crisis_flag"))
         is_crisis, triggered_by = self._is_crisis(message, emotion)
-        if is_crisis:
+        if forced_crisis or is_crisis:
             state["crisis_flag"] = True
             state["cbt_active"] = False  # cancel any active CBT flow
             self._save_state(user_id, state)
@@ -366,7 +369,7 @@ class DialogueManager:
                 user_id=user_id,
                 emotion=emotion,
                 confidence=confidence,
-                triggered_by=triggered_by,
+                triggered_by=state.get("crisis_triggered_by") or triggered_by or "pipeline",
             )
             return (
                 "I'm really concerned about what you've shared and I want you to know "

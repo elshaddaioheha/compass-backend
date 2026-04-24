@@ -13,12 +13,24 @@ import os
 from dataclasses import dataclass, field
 
 
+def _csv_env(name: str, default: str) -> tuple[str, ...]:
+    return tuple(
+        item.strip()
+        for item in os.getenv(name, default).split(",")
+        if item.strip()
+    )
+
+
 @dataclass(frozen=True)
 class Settings:
     # ── Flask ──────────────────────────────────────────────────────────────
     FLASK_ENV: str = field(default_factory=lambda: os.getenv("FLASK_ENV", "production"))
     SECRET_KEY: str = field(default_factory=lambda: os.getenv("SECRET_KEY", "change-me-in-production"))
     PORT: int = field(default_factory=lambda: int(os.getenv("PORT", 5000)))
+    FRONTEND_ORIGINS: tuple[str, ...] = field(default_factory=lambda: _csv_env(
+        "FRONTEND_ORIGINS",
+        "http://localhost:3000,https://compass-two-iota.vercel.app,https://compaass.vercel.app",
+    ))
 
     # ── MongoDB ────────────────────────────────────────────────────────────
     MONGO_URI: str = field(default_factory=lambda: os.getenv(
@@ -45,6 +57,12 @@ class Settings:
     MAX_INPUT_LENGTH: int = field(default_factory=lambda: int(os.getenv("MAX_INPUT_LENGTH", 512)))
     MAX_RAW_CHARS: int = field(default_factory=lambda: int(os.getenv("MAX_RAW_CHARS", 1000)))
     SPACY_MODEL: str = field(default_factory=lambda: os.getenv("SPACY_MODEL", "en_core_web_sm"))
+
+    # Language support
+    ENABLE_MULTILINGUAL: bool = field(default_factory=lambda: os.getenv("ENABLE_MULTILINGUAL", "true").lower() == "true")
+    SUPPORTED_LANGUAGES: tuple[str, ...] = field(default_factory=lambda: _csv_env("SUPPORTED_LANGUAGES", "en,yo,pcm"))
+    LANGUAGE_TRANSLATION_PROVIDER: str = field(default_factory=lambda: os.getenv("LANGUAGE_TRANSLATION_PROVIDER", "groq"))
+    LANGUAGE_TRANSLATION_TIMEOUT_SECONDS: float = field(default_factory=lambda: float(os.getenv("LANGUAGE_TRANSLATION_TIMEOUT_SECONDS", 8.0)))
 
     # ── Rate Limiting ──────────────────────────────────────────────────────
     RATE_LIMIT_REQUESTS: int = field(default_factory=lambda: int(os.getenv("RATE_LIMIT_REQUESTS", 30)))

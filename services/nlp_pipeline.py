@@ -48,6 +48,7 @@ from middleware.rate_limiter import check_rate_limit, RateLimitError
 from services.preprocessor import preprocess
 from models.emotion_classifier import classifier
 from services.dialogue_manager import DialogueManager
+from services.language_service import prepare_language_context, translate_reply
 from services.llm_service import generate_reply, LLMUnavailable
 from utils.logger import log_prediction, log_error, log_request
 
@@ -62,9 +63,9 @@ _MAX_HISTORY_TURNS = 4
 # ── Startup: confirm LLM status ───────────────────────────────────────────────
 _groq_key = os.getenv("GROQ_API_KEY", "")
 if _groq_key:
-    print(f"[pipeline] ✅ GROQ_API_KEY loaded (key starts with: {_groq_key[:8]}...)")
+    print(f"[pipeline] GROQ_API_KEY loaded (key starts with: {_groq_key[:8]}...)")
 else:
-    print("[pipeline] ⚠️  GROQ_API_KEY not set — will use template replies.")
+    print("[pipeline] GROQ_API_KEY not set - will use template replies.")
     print("           Add GROQ_API_KEY=gsk_... to your .env file.")
 
 
@@ -72,10 +73,12 @@ def _log_to_mongo(
     db,                   # pymongo database object (passed from app.py)
     user_id: str,
     raw_message: str,
+    processing_message: str,
     emotion: str,
     confidence: float,
     reply: str,
     latency_ms: float,
+    language_context=None,
 ) -> None:
     """
     Persist conversation record to MongoDB.
@@ -86,11 +89,21 @@ def _log_to_mongo(
             "user_id": user_id,
             "timestamp": datetime.now(timezone.utc).isoformat(),
             "user_message": raw_message,
+            "processing_message": processing_message,
             "detected_emotion": emotion,
             "confidence": round(confidence, 4),
             "bot_reply": reply,
             "latency_ms": round(latency_ms, 2),
         }
+        if language_context is not None:
+            record["language"] = {
+                "detected": language_context.detected_language,
+                "reply": language_context.reply_language,
+                "provider": language_context.provider,
+                "input_translation_applied": language_context.input_translation_applied,
+                "input_translation_error": language_context.input_translation_error,
+                "detection_confidence": round(language_context.detection_confidence, 4),
+            }
         db[_db_collection].insert_one(record)
     except Exception as e:
         log_error(error=str(e), context="mongo_log", user_id=user_id)
@@ -108,6 +121,8 @@ def process_message(
     raw_text: str,
     user_id: str,
     mongo_db=None,     # optional: pass pymongo db for persistence
+    requested_language: Optional[str] = None,
+    requested_reply_language: Optional[str] = None,
 ) -> dict:
     """
     Run the full NLP pipeline for one user message.
@@ -157,10 +172,18 @@ def process_message(
             "status_code": 429,
         }
 
-    # ── 3. Preprocessing ───────────────────────────────────────────────────
-    preprocessed = preprocess(clean_text)
+    # ── 3. Language detection / translation-in ─────────────────────────────
+    language_context = prepare_language_context(
+        clean_text,
+        requested_language=requested_language,
+        requested_reply_language=requested_reply_language,
+    )
+    processing_text = language_context.processing_text
 
-    # ── 4. Emotion classification ──────────────────────────────────────────
+    # ── 4. Preprocessing ───────────────────────────────────────────────────
+    preprocessed = preprocess(processing_text)
+
+    # ── 5. Emotion classification ──────────────────────────────────────────
     prediction = classifier.predict(preprocessed)
 
     log_prediction(
@@ -173,15 +196,18 @@ def process_message(
         low_confidence=prediction.low_confidence,
     )
 
-    # ── 5. Dialogue state update ───────────────────────────────────────────
+    # ── 6. Dialogue state update ───────────────────────────────────────────
     updated_state = _dm.update_state(
         user_id=user_id,
         emotion=prediction.emotion,
         confidence=prediction.confidence,
         message=preprocessed,
     )
+    if language_context.crisis_signal:
+        updated_state["crisis_flag"] = True
+        updated_state["crisis_triggered_by"] = language_context.crisis_signal_source
 
-    # ── 6. Generate reply ──────────────────────────────────────────────────
+    # ── 7. Generate reply ──────────────────────────────────────────────────
     # Crisis is always handled by the template engine (safety-critical —
     # must never be delegated to an external LLM).
     is_crisis = updated_state.get("crisis_flag") or prediction.emotion == "suicidal"
@@ -192,45 +218,59 @@ def process_message(
         # Try Groq LLM first; fall back to templates if unavailable
         try:
             reply = generate_reply(
-                user_message=clean_text,
+                user_message=processing_text,
                 emotion=prediction.emotion,
                 confidence=prediction.confidence,
                 history=_history[user_id],
             )
         except LLMUnavailable as e:
             # Print the FULL error so we can diagnose API key / network issues
-            print(f"[pipeline] ⚠️  LLM failed — falling back to templates.")
+            print("[pipeline] LLM failed - falling back to templates.")
             print(f"           Error: {e}")
             reply = _dm.get_next_reply(user_id, state=updated_state)
 
     # Track conversation history for LLM context (last 10 turns)
-    _history[user_id].append({"role": "user",      "content": clean_text})
+    _history[user_id].append({"role": "user",      "content": processing_text})
     _history[user_id].append({"role": "assistant", "content": reply})
     if len(_history[user_id]) > _MAX_HISTORY_TURNS:
         _history[user_id] = _history[user_id][-_MAX_HISTORY_TURNS:]
 
+    translated_reply = translate_reply(reply, language_context, is_crisis=is_crisis)
+    final_reply = translated_reply.reply
 
-    # ── 7. Total latency ───────────────────────────────────────────────────
+    # ── 8. Total latency ───────────────────────────────────────────────────
     total_latency_ms = (time.perf_counter() - t_pipeline_start) * 1000
 
-    # ── 8. MongoDB logging (non-blocking) ──────────────────────────────────
+    # ── 9. MongoDB logging (non-blocking) ──────────────────────────────────
     if mongo_db is not None:
         _log_to_mongo(
             db=mongo_db,
             user_id=user_id,
             raw_message=clean_text,      # sanitized, not raw
+            processing_message=processing_text,
             emotion=prediction.emotion,
             confidence=prediction.confidence,
-            reply=reply,
+            reply=final_reply,
             latency_ms=total_latency_ms,
+            language_context=language_context,
         )
 
     return {
-        "reply": reply,
+        "reply": final_reply,
         "emotion": prediction.emotion,
         "confidence": round(prediction.confidence, 4),
         "latency_ms": round(total_latency_ms, 2),
         "cache_hit": prediction.cache_hit,
+        "language": {
+            "detected": language_context.detected_language,
+            "reply": language_context.reply_language,
+            "provider": language_context.provider,
+            "input_translation_applied": language_context.input_translation_applied,
+            "output_translation_applied": translated_reply.output_translation_applied,
+            "input_translation_error": language_context.input_translation_error,
+            "output_translation_error": translated_reply.output_translation_error,
+            "detection_confidence": round(language_context.detection_confidence, 4),
+        },
         "error": None,
         "status_code": 200,
     }

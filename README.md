@@ -26,6 +26,7 @@ final-year-project/
 │
 ├── services/
 │   ├── __init__.py
+│   ├── language_service.py       # Language detection + translation wrapper
 │   ├── preprocessor.py           # Text cleaning before model
 │   ├── dialogue_manager.py       # Redis-backed session + CBT flow
 │   └── nlp_pipeline.py           # Orchestrates preprocessor → model → DM
@@ -62,6 +63,9 @@ InputValidator      → rejects bad input (XSS, empty, too long)
 RateLimiter         → blocks abuse (Redis sliding window)
     │
     ▼
+LanguageService     → detects en/yo/pcm, translates to English when needed
+    │
+    ▼
 Preprocessor        → strips URLs, normalises whitespace & repeated chars
     │
     ▼
@@ -76,6 +80,12 @@ MongoDB logger      → persists conversation record (optional)
     ▼
 JSON response       → { reply, emotion, confidence }
 ```
+
+Multilingual support is translation-first: Yoruba and Nigerian Pidgin input is
+translated to English for the current DistilBERT classifier, then the bot reply
+is translated back to the user's reply language when a translation provider is
+available. If translation fails, the app falls back safely to the original text
+or English reply instead of blocking the conversation.
 
 ---
 
@@ -137,6 +147,19 @@ python -m pytest tests/ -v
 python -m unittest tests/test_nlp_pipeline.py -v
 ```
 
+### Live language acceptance
+
+This calls the configured translation provider, so run it only when `GROQ_API_KEY`
+is available:
+
+```bash
+python scripts/check_language_acceptance.py
+```
+
+See `docs/language_acceptance.md` for the manual Yoruba/Pidgin review checklist.
+See `docs/frontend_integration.md` for the external frontend request/response
+contract.
+
 ---
 
 ## API Endpoints
@@ -152,15 +175,33 @@ python -m unittest tests/test_nlp_pipeline.py -v
 ```bash
 curl -X POST http://localhost:5000/send \
   -H "Content-Type: application/json" \
-  -d '{"message": "I feel really anxious and cannot sleep"}'
+  -d '{"message": "I feel really anxious and cannot sleep", "language": "auto"}'
 ```
+
+Optional language fields:
+
+| Field | Values | Purpose |
+|-------|--------|---------|
+| `session_id` | string | Stable conversation/session ID from the frontend |
+| `conversation_id` | string | Alias for `session_id` if that fits the frontend naming better |
+| `language` | `auto`, `en`, `yo`, `pcm` | User input language hint |
+| `preferred_language` | `auto`, `en`, `yo`, `pcm` | Backward-compatible alias for `language` |
+| `reply_language` | `en`, `yo`, `pcm` | Force bot reply language |
 
 ### Example response
 ```json
 {
   "reply": "I can hear that you're feeling anxious. That takes a lot to share. 💙\n\nWould you like to try a calming breathing exercise that might help calm your nervous system?",
   "emotion": "anxiety",
-  "confidence": 0.8912
+  "confidence": 0.8912,
+  "session_id": "compass-conversation-id",
+  "language": {
+    "detected": "en",
+    "reply": "en",
+    "provider": "groq",
+    "input_translation_applied": false,
+    "output_translation_applied": false
+  }
 }
 ```
 
@@ -172,6 +213,16 @@ curl -X POST http://localhost:5000/send \
 |---------|---------|---------|
 | Redis | Session state + prediction cache + rate limiting | `localhost:6379` |
 | MongoDB | Conversation persistence (optional) | `localhost:27017` |
+
+### Language configuration
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `FRONTEND_ORIGINS` | `http://localhost:3000,https://compass-two-iota.vercel.app,https://compaass.vercel.app` | Comma-separated allowed CORS origins |
+| `ENABLE_MULTILINGUAL` | `true` | Enables language detection and translation flow |
+| `SUPPORTED_LANGUAGES` | `en,yo,pcm` | Enabled language codes |
+| `LANGUAGE_TRANSLATION_PROVIDER` | `groq` | Translation provider, or any other value to disable provider translation |
+| `LANGUAGE_TRANSLATION_TIMEOUT_SECONDS` | `8.0` | Translation request timeout |
 
 ---
 

@@ -61,11 +61,14 @@ app.secret_key = settings.SECRET_KEY
 # Production:  https://compass-two-iota.vercel.app
 try:
     from flask_cors import CORS
-    CORS(app, origins=[
-        "http://localhost:3000",
-        "https://compass-two-iota.vercel.app",
-        "https://compaass.vercel.app",
-    ], supports_credentials=True)
+    CORS(
+        app,
+        origins=list(settings.FRONTEND_ORIGINS),
+        supports_credentials=True,
+        methods=["GET", "POST", "OPTIONS"],
+        allow_headers=["Content-Type", "Authorization"],
+        max_age=86400,
+    )
     print("[app] CORS enabled for Next.js frontend.")
 except ImportError:
     print("[app] flask-cors not installed — run: py -m pip install flask-cors")
@@ -84,6 +87,13 @@ def _get_user_id() -> str:
     return session["user_id"]
 
 
+def _string_or_empty(value) -> str:
+    """Return stripped string input, safely handling null/non-string JSON values."""
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -100,14 +110,19 @@ def send():
     Request body (JSON):
         {
             "message":    "I feel anxious",
-            "session_id": "compass-conversation-id"   # optional — from Next.js
+            "session_id": "compass-conversation-id",  # optional — from Next.js
+            "conversation_id": "compass-conversation-id",  # optional alias
+            "language":   "auto|en|yo|pcm",           # optional
+            "reply_language": "en|yo|pcm"             # optional
         }
 
     Response (JSON):
         {
             "reply":      "...",
             "emotion":    "anxiety",
-            "confidence": 0.87
+            "confidence": 0.87,
+            "language":   {...},
+            "session_id": "compass-conversation-id"
         }
     """
     import time
@@ -116,11 +131,16 @@ def send():
     # Parse request
     data = request.get_json(silent=True) or {}
     raw_text = data.get("message", "")
+    requested_language = data.get("language") or data.get("preferred_language")
+    requested_reply_language = data.get("reply_language")
 
     # Prefer session_id from the request body (sent by Next.js per conversation).
     # This means each conversation thread gets its own isolated session context.
     # Fall back to the Flask cookie-based session for the legacy HTML UI.
-    client_session_id = data.get("session_id", "").strip()
+    client_session_id = (
+        _string_or_empty(data.get("session_id"))
+        or _string_or_empty(data.get("conversation_id"))
+    )
     user_id = client_session_id if client_session_id else _get_user_id()
 
     # Run full NLP pipeline
@@ -128,6 +148,8 @@ def send():
         raw_text=raw_text,
         user_id=user_id,
         mongo_db=_mongo_db,
+        requested_language=requested_language,
+        requested_reply_language=requested_reply_language,
     )
 
     latency_ms = (time.perf_counter() - t_start) * 1000
@@ -143,7 +165,10 @@ def send():
         "reply":      result["reply"],
         "emotion":    result["emotion"],
         "confidence": result["confidence"],
+        "session_id":  user_id,
     }
+    if "language" in result:
+        response_body["language"] = result["language"]
     if result["error"]:
         response_body["error"] = result["error"]
 
