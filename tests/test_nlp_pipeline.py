@@ -232,6 +232,7 @@ class TestProcessMessage(unittest.TestCase):
 
     def setUp(self):
         from models.emotion_classifier import PredictionResult
+        from services.language_service import LanguageContext, ReplyTranslation
 
         mock_prediction = PredictionResult(
             emotion="anxiety", confidence=0.88,
@@ -247,14 +248,46 @@ class TestProcessMessage(unittest.TestCase):
         )
 
         import services.nlp_pipeline as pm
+        self._LanguageContext = LanguageContext
+        self._ReplyTranslation = ReplyTranslation
         self._p1 = patch.object(pm, "classifier", self._mock_classifier)
         self._p2 = patch.object(pm, "_dm", self._mock_dm)
+        self._p3 = patch.object(
+            pm,
+            "prepare_language_context",
+            side_effect=lambda text, requested_language=None, requested_reply_language=None: LanguageContext(
+                original_text=text,
+                processing_text=text,
+                detected_language=requested_language or "en",
+                reply_language=requested_reply_language or requested_language or "en",
+                provider="test",
+                input_translation_applied=False,
+                input_translation_error=None,
+                detection_confidence=1.0,
+            ),
+        )
+        self._p4 = patch.object(
+            pm,
+            "translate_reply",
+            side_effect=lambda reply, context, is_crisis=False: ReplyTranslation(
+                reply=reply,
+                output_translation_applied=False,
+                output_translation_error=None,
+            ),
+        )
+        self._p5 = patch.object(pm, "generate_reply", side_effect=pm.LLMUnavailable("LLM disabled in tests"))
         self._p1.start()
         self._p2.start()
+        self._p3.start()
+        self._p4.start()
+        self._p5.start()
 
     def tearDown(self):
         self._p1.stop()
         self._p2.stop()
+        self._p3.stop()
+        self._p4.stop()
+        self._p5.stop()
 
     def test_valid_message_returns_200_with_reply(self):
         from services.nlp_pipeline import process_message
@@ -294,6 +327,199 @@ class TestProcessMessage(unittest.TestCase):
         result = process_message("Feeling down", user_id="u_test")
         self.assertIn("latency_ms", result)
         self.assertIsInstance(result["latency_ms"], float)
+
+    def test_multilingual_input_uses_translated_text_for_classifier(self):
+        import services.nlp_pipeline as pm
+        from services.nlp_pipeline import process_message
+
+        pm.prepare_language_context.side_effect = lambda text, requested_language=None, requested_reply_language=None: self._LanguageContext(
+            original_text=text,
+            processing_text="I feel very anxious",
+            detected_language="yo",
+            reply_language="yo",
+            provider="test",
+            input_translation_applied=True,
+            input_translation_error=None,
+            detection_confidence=0.95,
+        )
+        pm.translate_reply.side_effect = lambda reply, context, is_crisis=False: self._ReplyTranslation(
+            reply="Mo gbo pe ara re ko ya. Se o fe gbiyanju mimi die?",
+            output_translation_applied=True,
+            output_translation_error=None,
+        )
+
+        result = process_message("Ara mi n ya mi", user_id="u_yo", requested_language="yo")
+
+        self.assertEqual(result["status_code"], 200)
+        self._mock_classifier.predict.assert_called_with("I feel very anxious")
+        self.assertEqual(result["language"]["detected"], "yo")
+        self.assertTrue(result["language"]["input_translation_applied"])
+        self.assertTrue(result["language"]["output_translation_applied"])
+        self.assertIn("mimi", result["reply"])
+
+    def test_language_crisis_signal_forces_template_reply(self):
+        import services.nlp_pipeline as pm
+        from services.nlp_pipeline import process_message
+
+        pm.prepare_language_context.side_effect = lambda text, requested_language=None, requested_reply_language=None: self._LanguageContext(
+            original_text=text,
+            processing_text=text,
+            detected_language="pcm",
+            reply_language="pcm",
+            provider="test",
+            input_translation_applied=False,
+            input_translation_error="provider unavailable",
+            detection_confidence=0.95,
+            crisis_signal=True,
+            crisis_signal_source="language:pcm:i wan die",
+        )
+
+        result = process_message("I wan die", user_id="u_pcm", requested_language="pcm")
+
+        self.assertEqual(result["status_code"], 200)
+        self._mock_dm.get_next_reply.assert_called_once()
+        _, kwargs = pm.translate_reply.call_args
+        self.assertTrue(kwargs["is_crisis"])
+
+
+class TestLanguageService(unittest.TestCase):
+
+    def test_detects_pidgin_markers(self):
+        from services.language_service import detect_language
+        language, confidence = detect_language("Abeg I no fit sleep, wetin I go do?")
+        self.assertEqual(language, "pcm")
+        self.assertGreater(confidence, 0.5)
+
+    def test_requested_language_overrides_heuristics(self):
+        from services.language_service import detect_language
+        language, confidence = detect_language("Hello there", requested_language="yoruba")
+        self.assertEqual(language, "yo")
+        self.assertEqual(confidence, 1.0)
+
+    def test_detects_pidgin_crisis_signal(self):
+        from services.language_service import detect_crisis_signal
+        is_crisis, source = detect_crisis_signal("I wan die", "pcm")
+        self.assertTrue(is_crisis)
+        self.assertIn("pcm", source)
+
+    def test_crisis_reply_uses_fixed_localized_template(self):
+        from services.language_service import LanguageContext, translate_reply
+
+        context = LanguageContext(
+            original_text="Mo fe ku",
+            processing_text="I want to die",
+            detected_language="yo",
+            reply_language="yo",
+            provider="test",
+            input_translation_applied=True,
+            input_translation_error=None,
+            detection_confidence=1.0,
+            crisis_signal=True,
+            crisis_signal_source="language:yo:mo fe ku",
+        )
+
+        result = translate_reply("English crisis reply", context, is_crisis=True)
+
+        self.assertTrue(result.output_translation_applied)
+        self.assertIn("0800-SUICIDE", result.reply)
+        self.assertIn("+234 809 111 6264", result.reply)
+        self.assertIn("Mo ni aniyan", result.reply)
+
+
+class TestSendEndpoint(unittest.TestCase):
+
+    def test_send_forwards_language_fields_and_returns_metadata(self):
+        from app import app as flask_app
+        import app as app_module
+
+        expected_language = {
+            "detected": "pcm",
+            "reply": "pcm",
+            "provider": "test",
+            "input_translation_applied": True,
+            "output_translation_applied": True,
+            "input_translation_error": None,
+            "output_translation_error": None,
+            "detection_confidence": 0.95,
+        }
+        mock_result = {
+            "reply": "I hear you",
+            "emotion": "anxiety",
+            "confidence": 0.88,
+            "language": expected_language,
+            "error": None,
+            "status_code": 200,
+        }
+
+        with patch.object(app_module, "process_message", return_value=mock_result) as mock_process:
+            client = flask_app.test_client()
+            response = client.post(
+                "/send",
+                json={
+                    "message": "I no fit sleep",
+                    "session_id": "conversation-1",
+                    "language": "pcm",
+                    "reply_language": "pcm",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["language"], expected_language)
+        self.assertEqual(data["session_id"], "conversation-1")
+        mock_process.assert_called_once()
+        _, kwargs = mock_process.call_args
+        self.assertEqual(kwargs["raw_text"], "I no fit sleep")
+        self.assertEqual(kwargs["user_id"], "conversation-1")
+        self.assertEqual(kwargs["requested_language"], "pcm")
+        self.assertEqual(kwargs["requested_reply_language"], "pcm")
+
+    def test_send_accepts_conversation_id_alias(self):
+        from app import app as flask_app
+        import app as app_module
+
+        mock_result = {
+            "reply": "I hear you",
+            "emotion": "neutral",
+            "confidence": 0.75,
+            "error": None,
+            "status_code": 200,
+        }
+
+        with patch.object(app_module, "process_message", return_value=mock_result) as mock_process:
+            client = flask_app.test_client()
+            response = client.post(
+                "/send",
+                json={
+                    "message": "Hello",
+                    "session_id": None,
+                    "conversation_id": "thread-42",
+                },
+            )
+
+        self.assertEqual(response.status_code, 200)
+        data = response.get_json()
+        self.assertEqual(data["session_id"], "thread-42")
+        _, kwargs = mock_process.call_args
+        self.assertEqual(kwargs["user_id"], "thread-42")
+
+    def test_send_cors_preflight_allows_configured_frontend_origin(self):
+        from app import app as flask_app
+
+        client = flask_app.test_client()
+        response = client.options(
+            "/send",
+            headers={
+                "Origin": "https://compaass.vercel.app",
+                "Access-Control-Request-Method": "POST",
+                "Access-Control-Request-Headers": "Content-Type",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "https://compaass.vercel.app")
+        self.assertIn("Content-Type", response.headers.get("Access-Control-Allow-Headers", ""))
+        self.assertIn("POST", response.headers.get("Access-Control-Allow-Methods", ""))
 
 
 if __name__ == "__main__":

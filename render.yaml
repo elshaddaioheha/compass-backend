@@ -29,6 +29,14 @@ services:
         sync: false # ← set via Render dashboard (secret)
       - key: GROQ_MODEL
         value: llama-3.1-8b-instant
+      - key: LANGUAGE_TRANSLATION_PROVIDER
+        value: groq
+      - key: ENABLE_MULTILINGUAL
+        value: "true"
+      - key: SUPPORTED_LANGUAGES
+        value: en,yo,pcm
+      - key: LANGUAGE_TRANSLATION_TIMEOUT_SECONDS
+        value: "8.0"
 
       # ── MongoDB ───────────────────────────────────────────────────────────
       - key: MONGO_URI
@@ -58,6 +66,8 @@ services:
         generateValue: true # Render generates a secure random value
       - key: PORT
         value: "10000"
+      - key: FRONTEND_ORIGINS
+        value: http://localhost:3000,https://compass-two-iota.vercel.app,https://compaass.vercel.app
 
       # ── NLP ───────────────────────────────────────────────────────────────
       - key: SPACY_MODEL

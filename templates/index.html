@@ -169,6 +169,19 @@
       align-items: flex-end;
       border-top: 1px solid #1e2235;
     }
+    #language-select {
+      height: 46px;
+      flex: 0 0 116px;
+      background: #1e2235;
+      border: 1px solid #334155;
+      border-radius: 12px;
+      color: #e2e8f0;
+      font-family: inherit;
+      font-size: 13px;
+      padding: 0 10px;
+      outline: none;
+    }
+    #language-select:focus { border-color: #6366f1; }
     #user-input {
       flex: 1;
       background: #1e2235;
@@ -208,6 +221,11 @@
     .em-neutral    { background: #f1f5f9; color: #475569; }
     .em-uncertain  { background: #fafafa; color: #6b7280; }
     .em-suicidal   { background: #fecaca; color: #7f1d1d; }
+
+    @media (max-width: 640px) {
+      .chat-input-bar { flex-wrap: wrap; }
+      #language-select { flex: 1 1 100%; }
+    }
   </style>
 </head>
 <body>
@@ -243,6 +261,12 @@
 
     <!-- Input -->
     <div class="chat-input-bar">
+      <select id="language-select" aria-label="Language" title="Language">
+        <option value="auto">Auto</option>
+        <option value="en">English</option>
+        <option value="yo">Yoruba</option>
+        <option value="pcm">Pidgin</option>
+      </select>
       <textarea
         id="user-input"
         rows="1"
@@ -258,6 +282,7 @@
     const inputEl    = document.getElementById('user-input');
     const sendBtn    = document.getElementById('send-btn');
     const typingEl   = document.getElementById('typing');
+    const languageEl = document.getElementById('language-select');
 
     const EMOTION_CLASSES = {
       anxiety: 'em-anxiety', depression: 'em-depression', anger: 'em-anger',
@@ -269,7 +294,7 @@
       return new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     }
 
-    function appendMessage(role, text, emotion, confidence) {
+    function appendMessage(role, text, emotion, confidence, language) {
       const wrap = document.createElement('div');
       wrap.className = `message ${role}`;
 
@@ -288,7 +313,9 @@
       if (role === 'bot' && emotion && emotion !== 'null') {
         const badge = document.createElement('span');
         badge.className = `emotion-badge ${EMOTION_CLASSES[emotion] || ''}`;
-        badge.textContent = `${emotion} · ${Math.round(confidence * 100)}%`;
+        const confidenceText = Number.isFinite(confidence) ? `${Math.round(confidence * 100)}%` : '';
+        const languageText = language && language.reply ? ` · ${language.reply.toUpperCase()}` : '';
+        badge.textContent = `${emotion} ${confidenceText}${languageText}`.trim();
         inner.appendChild(badge);
       }
 
@@ -321,14 +348,20 @@
       setTyping(true);
 
       try {
+        const selectedLanguage = languageEl.value;
+        const payload = { message: text, language: selectedLanguage };
+        if (selectedLanguage !== 'auto') {
+          payload.reply_language = selectedLanguage;
+        }
+
         const res = await fetch('/send', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ message: text }),
+          body: JSON.stringify(payload),
         });
         const data = await res.json();
         setTyping(false);
-        appendMessage('bot', data.reply || data.error, data.emotion, data.confidence);
+        appendMessage('bot', data.reply || data.error, data.emotion, data.confidence, data.language);
       } catch (err) {
         setTyping(false);
         appendMessage('bot', 'Sorry, I had trouble connecting. Please try again. 🙏');
