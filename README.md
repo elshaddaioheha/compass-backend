@@ -223,6 +223,9 @@ Optional language fields:
 | `SUPPORTED_LANGUAGES` | `en,yo,pcm` | Enabled language codes |
 | `LANGUAGE_TRANSLATION_PROVIDER` | `groq` | Translation provider, or any other value to disable provider translation |
 | `LANGUAGE_TRANSLATION_TIMEOUT_SECONDS` | `8.0` | Translation request timeout |
+| `LLM_HISTORY_TURNS` | `6` | Recent chat messages sent to the LLM for context |
+| `LLM_TIMEOUT_SECONDS` | `8.0` | LLM response timeout before template fallback |
+| `LLM_MAX_TOKENS` | `200` | Maximum LLM reply tokens |
 
 ---
 

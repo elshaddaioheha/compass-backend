@@ -64,6 +64,11 @@ class Settings:
     LANGUAGE_TRANSLATION_PROVIDER: str = field(default_factory=lambda: os.getenv("LANGUAGE_TRANSLATION_PROVIDER", "groq"))
     LANGUAGE_TRANSLATION_TIMEOUT_SECONDS: float = field(default_factory=lambda: float(os.getenv("LANGUAGE_TRANSLATION_TIMEOUT_SECONDS", 8.0)))
 
+    # LLM generation
+    LLM_HISTORY_TURNS: int = field(default_factory=lambda: int(os.getenv("LLM_HISTORY_TURNS", 6)))
+    LLM_TIMEOUT_SECONDS: float = field(default_factory=lambda: float(os.getenv("LLM_TIMEOUT_SECONDS", 8.0)))
+    LLM_MAX_TOKENS: int = field(default_factory=lambda: int(os.getenv("LLM_MAX_TOKENS", 200)))
+
     # ── Rate Limiting ──────────────────────────────────────────────────────
     RATE_LIMIT_REQUESTS: int = field(default_factory=lambda: int(os.getenv("RATE_LIMIT_REQUESTS", 30)))
     RATE_LIMIT_WINDOW_SECONDS: int = field(default_factory=lambda: int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", 60)))
