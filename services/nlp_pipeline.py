@@ -51,14 +51,15 @@ from services.dialogue_manager import DialogueManager
 from services.language_service import prepare_language_context, translate_reply
 from services.llm_service import generate_reply, LLMUnavailable
 from utils.logger import log_prediction, log_error, log_request
+from config.settings import settings
 
 
 # Single DialogueManager instance — stateless, safe to share
 _dm = DialogueManager()
 
-# In-process conversation history per user (last 4 turns = 2 exchanges)
+# In-process conversation history per user. Default is 6 turns = 3 exchanges.
 _history: dict[str, list] = defaultdict(list)
-_MAX_HISTORY_TURNS = 4
+_MAX_HISTORY_TURNS = settings.LLM_HISTORY_TURNS
 
 # ── Startup: confirm LLM status ───────────────────────────────────────────────
 _groq_key = os.getenv("GROQ_API_KEY", "")
@@ -229,7 +230,7 @@ def process_message(
             print(f"           Error: {e}")
             reply = _dm.get_next_reply(user_id, state=updated_state)
 
-    # Track conversation history for LLM context (last 10 turns)
+    # Track conversation history for LLM context.
     _history[user_id].append({"role": "user",      "content": processing_text})
     _history[user_id].append({"role": "assistant", "content": reply})
     if len(_history[user_id]) > _MAX_HISTORY_TURNS:

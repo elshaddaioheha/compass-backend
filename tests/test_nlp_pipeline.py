@@ -426,6 +426,43 @@ class TestLanguageService(unittest.TestCase):
         self.assertIn("Mo ni aniyan", result.reply)
 
 
+class TestLLMService(unittest.TestCase):
+
+    def test_generate_reply_uses_configured_history_turn_limit(self):
+        import services.llm_service as llm
+
+        history = [
+            {"role": "user", "content": f"user {i}"}
+            if i % 2 == 0
+            else {"role": "assistant", "content": f"assistant {i}"}
+            for i in range(8)
+        ]
+
+        mock_choice = MagicMock()
+        mock_choice.message.content = "I hear you. What feels hardest right now?"
+        mock_response = MagicMock()
+        mock_response.choices = [mock_choice]
+
+        mock_client = MagicMock()
+        mock_client.chat.completions.create.return_value = mock_response
+
+        with patch.object(llm, "_get_client", return_value=mock_client):
+            reply = llm.generate_reply(
+                user_message="I feel anxious",
+                emotion="anxiety",
+                confidence=0.88,
+                history=history,
+            )
+
+        self.assertIn("hardest", reply)
+        _, kwargs = mock_client.chat.completions.create.call_args
+        sent_messages = kwargs["messages"]
+        sent_history = sent_messages[1:-1]
+        self.assertEqual(sent_history, history[-6:])
+        self.assertEqual(kwargs["max_tokens"], 200)
+        self.assertEqual(kwargs["timeout"], 8.0)
+
+
 class TestSendEndpoint(unittest.TestCase):
 
     def test_send_forwards_language_fields_and_returns_metadata(self):

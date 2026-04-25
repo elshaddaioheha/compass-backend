@@ -5,7 +5,7 @@ Groq-powered LLM response generation for the mental health chatbot.
 
 The LLM is given:
   - The detected emotion and confidence from DistilBERT
-  - The last 5 turns of conversation history (for context)
+  - Recent conversation history, capped by LLM_HISTORY_TURNS
   - A strict mental health system prompt with safety guardrails
 
 Falls back gracefully to the template engine if:
@@ -28,6 +28,7 @@ import os
 import time
 from typing import Optional
 
+from config.settings import settings
 from utils.logger import log_error
 
 # ── Groq client — loaded lazily on first request ─────────────────────────────
@@ -106,7 +107,7 @@ def generate_reply(
     emotion: str,
     confidence: float,
     history: Optional[list] = None,
-    timeout: float = 8.0,
+    timeout: Optional[float] = None,
 ) -> str:
     """
     Generate a natural, contextual reply using Groq (Llama 3).
@@ -130,9 +131,9 @@ def generate_reply(
     # Build message list for the API
     messages = [{"role": "system", "content": _SYSTEM_PROMPT}]
 
-    # Inject last 4 history turns (keep context window small for speed)
+    # Inject recent history turns (default 6 = up to 3 user+assistant pairs).
     if history:
-        messages.extend(history[-4:])   # up to 2 user+assistant pairs
+        messages.extend(history[-settings.LLM_HISTORY_TURNS:])
 
     # Append the current user message, annotated with emotion context
     guidance = _EMOTION_GUIDANCE.get(emotion, _EMOTION_GUIDANCE["neutral"])
@@ -149,9 +150,9 @@ def generate_reply(
         response = client.chat.completions.create(
             model=model,
             messages=messages,
-            max_tokens=200,
+            max_tokens=settings.LLM_MAX_TOKENS,
             temperature=0.75,
-            timeout=timeout,
+            timeout=timeout if timeout is not None else settings.LLM_TIMEOUT_SECONDS,
         )
         latency_ms = (time.perf_counter() - t_start) * 1000
         reply = response.choices[0].message.content.strip()
