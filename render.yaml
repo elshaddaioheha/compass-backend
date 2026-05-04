@@ -73,7 +73,7 @@ services:
       - key: SPACY_MODEL
         value: en_core_web_sm
       - key: CONFIDENCE_THRESHOLD
-        value: "0.55"
+        value: "0.50"
       - key: MAX_INPUT_LENGTH
         value: "512"
       - key: MAX_RAW_CHARS

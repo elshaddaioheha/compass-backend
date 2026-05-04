@@ -53,7 +53,7 @@ class Settings:
     LABELS_PATH: str = field(default_factory=lambda: os.getenv("LABELS_PATH", "./label_classes.json"))
 
     # ── NLP ────────────────────────────────────────────────────────────────
-    CONFIDENCE_THRESHOLD: float = field(default_factory=lambda: float(os.getenv("CONFIDENCE_THRESHOLD", 0.55)))
+    CONFIDENCE_THRESHOLD: float = field(default_factory=lambda: float(os.getenv("CONFIDENCE_THRESHOLD", 0.50)))
     MAX_INPUT_LENGTH: int = field(default_factory=lambda: int(os.getenv("MAX_INPUT_LENGTH", 512)))
     MAX_RAW_CHARS: int = field(default_factory=lambda: int(os.getenv("MAX_RAW_CHARS", 1000)))
     SPACY_MODEL: str = field(default_factory=lambda: os.getenv("SPACY_MODEL", "en_core_web_sm"))
