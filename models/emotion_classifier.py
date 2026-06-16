@@ -11,14 +11,18 @@ DistilBERT emotion classifier with:
 The model is loaded ONCE when this module is first imported.
 All subsequent calls share the same loaded model.
 
-Emotion labels match your training dataset:
-    anxiety, depression, anger, confusion, sadness, neutral, suicidal
+Emotion labels are loaded from label_classes.json (in model output order):
+    anger, anxiety, confusion, neutral, sadness
+
+Note: suicidal-risk is NOT a model label. It is detected separately by the
+crisis layer (services/dialogue_manager.py and services/language_service.py),
+which is more reliable for safety-critical wording than a learned class.
 
 Usage:
     from models.emotion_classifier import classifier
 
-    result = classifier.predict("I feel completely hopeless")
-    # → {"emotion": "depression", "confidence": 0.91, "cache_hit": False, "low_confidence": False}
+    result = classifier.predict("I feel completely worn out")
+    # → {"emotion": "sadness", "confidence": 0.91, "cache_hit": False, "low_confidence": False}
 """
 
 import hashlib
@@ -93,25 +97,23 @@ class EmotionClassifier:
         """
         Load label classes from the JSON file saved during training.
 
-        Expected format: ["anxiety", "depression", "anger", ...]
+        Expected format: ["anger", "anxiety", "confusion", "neutral", "sadness"]
+        The order MUST match the model's output logits.
 
-        If the file doesn't exist, falls back to a default set matching
-        the emotion classes in your training dataset.
+        If the file doesn't exist, falls back to the known training labels.
         """
         try:
             with open(settings.LABELS_PATH, "r") as f:
                 labels = json.load(f)
             return labels
         except FileNotFoundError:
-            # Fallback — matches the mental health dataset emotion classes
+            # Fallback — must match label_classes.json (the 5 trained classes)
             return [
-                "anxiety",
-                "depression",
                 "anger",
+                "anxiety",
                 "confusion",
-                "sadness",
                 "neutral",
-                "suicidal",
+                "sadness",
             ]
 
     # ── Model loading ─────────────────────────────────────────────────────

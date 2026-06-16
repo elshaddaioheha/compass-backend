@@ -73,6 +73,25 @@ class Settings:
     RATE_LIMIT_REQUESTS: int = field(default_factory=lambda: int(os.getenv("RATE_LIMIT_REQUESTS", 30)))
     RATE_LIMIT_WINDOW_SECONDS: int = field(default_factory=lambda: int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", 60)))
 
+    # ── Therapist emergency alerts ───────────────────────────────────────────
+    # When a hard crisis is detected, email an on-call therapist so a human can
+    # follow up. Disabled unless ENABLE_THERAPIST_ALERTS=true AND SMTP + a
+    # recipient are configured. Sending never blocks or breaks the user reply.
+    ENABLE_THERAPIST_ALERTS: bool = field(default_factory=lambda: os.getenv("ENABLE_THERAPIST_ALERTS", "false").lower() == "true")
+    THERAPIST_ALERT_EMAIL: str = field(default_factory=lambda: os.getenv("THERAPIST_ALERT_EMAIL", ""))
+    ALERT_EMAIL_FROM: str = field(default_factory=lambda: os.getenv("ALERT_EMAIL_FROM", ""))
+    ALERT_APP_NAME: str = field(default_factory=lambda: os.getenv("ALERT_APP_NAME", "COMPASS"))
+    # One alert per user per this many seconds (avoids spamming during an
+    # ongoing crisis conversation). 0 disables de-duplication.
+    ALERT_COOLDOWN_SECONDS: int = field(default_factory=lambda: int(os.getenv("ALERT_COOLDOWN_SECONDS", 900)))
+    # SMTP transport. Works with Gmail, SendGrid SMTP relay, Mailgun, etc.
+    SMTP_HOST: str = field(default_factory=lambda: os.getenv("SMTP_HOST", ""))
+    SMTP_PORT: int = field(default_factory=lambda: int(os.getenv("SMTP_PORT", 587)))
+    SMTP_USERNAME: str = field(default_factory=lambda: os.getenv("SMTP_USERNAME", ""))
+    SMTP_PASSWORD: str = field(default_factory=lambda: os.getenv("SMTP_PASSWORD", ""))
+    SMTP_USE_TLS: bool = field(default_factory=lambda: os.getenv("SMTP_USE_TLS", "true").lower() == "true")
+    SMTP_TIMEOUT_SECONDS: float = field(default_factory=lambda: float(os.getenv("SMTP_TIMEOUT_SECONDS", 10.0)))
+
 
 # Singleton — import this everywhere
 settings = Settings()

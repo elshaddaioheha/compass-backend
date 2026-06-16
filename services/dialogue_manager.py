@@ -51,12 +51,26 @@ except OSError:
 
 
 # ── Crisis keywords ───────────────────────────────────────────────────────────
-# These are used as a secondary signal alongside the model's "suicidal" label.
-# Kept minimal and focused on high-confidence crisis signals.
+# High-confidence English distress / suicidal-risk phrases. These are the
+# primary crisis signal: the model has no "suicidal" class, so a keyword hit
+# here is what routes a message to the fixed safety template + therapist alert.
+# Multi-word phrases (not bare words like "die") keep false positives low.
 _CRISIS_KEYWORDS = frozenset([
-    "kill myself", "end my life", "want to die", "suicide",
-    "suicidal", "i can't go on", "no reason to live",
-    "hurt myself", "self-harm", "cutting myself",
+    # Suicidal intent
+    "kill myself", "killing myself", "kill me",
+    "end my life", "ending my life", "take my own life", "end myself",
+    "want to die", "wanna die", "don't want to live", "do not want to live",
+    "don't want to be here", "no reason to live", "no point in living",
+    "tired of living", "give up on life", "end it all",
+    "better off dead", "wish i was dead", "wish i were dead",
+    "want to disappear", "rather be dead",
+    "suicide", "suicidal", "overdose",
+    # Inability to continue
+    "i can't go on", "i cant go on", "can't go on anymore", "can't take it anymore",
+    "cant take it anymore",
+    # Self-harm
+    "hurt myself", "harm myself", "self-harm", "self harm",
+    "cutting myself", "cut myself",
 ])
 
 # ── Nigerian crisis resources (localized per your project scope) ──────────
@@ -315,8 +329,18 @@ class DialogueManager:
         state["last_confidence"] = confidence
         state["last_message"] = message
         state["turn_count"] = state.get("turn_count", 0) + 1
-        state["crisis_flag"] = False
-        state.pop("crisis_triggered_by", None)
+
+        # Detect crisis here (model "suicidal" label or crisis keywords) so the
+        # flag is set BEFORE the pipeline decides whether to call the LLM.
+        # Crisis must always be answered by the deterministic template engine —
+        # never delegated to the LLM — so this check cannot live only inside
+        # get_next_reply (which the pipeline skips when the LLM is available).
+        crisis, triggered_by = self._is_crisis(message, emotion)
+        state["crisis_flag"] = crisis
+        if crisis:
+            state["crisis_triggered_by"] = triggered_by
+        else:
+            state.pop("crisis_triggered_by", None)
 
         if entities:
             state["last_entities"] = entities
