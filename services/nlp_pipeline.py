@@ -50,6 +50,7 @@ from models.emotion_classifier import classifier
 from services.dialogue_manager import DialogueManager
 from services.language_service import prepare_language_context, translate_reply
 from services.llm_service import generate_reply, LLMUnavailable
+from services.alert_service import maybe_alert_therapist
 from utils.logger import log_prediction, log_error, log_request
 from config.settings import settings
 
@@ -215,6 +216,21 @@ def process_message(
 
     if is_crisis:
         reply = _dm.get_next_reply(user_id, state=updated_state)
+        # Escalate to a human: email an on-call therapist (fail-safe, opt-in,
+        # de-duplicated). This never blocks or alters the user's crisis reply.
+        maybe_alert_therapist(
+            user_id=user_id,
+            message=language_context.original_text,
+            emotion=prediction.emotion,
+            confidence=prediction.confidence,
+            triggered_by=(
+                updated_state.get("crisis_triggered_by")
+                or language_context.crisis_signal_source
+                or "crisis"
+            ),
+            language=language_context.detected_language,
+            translated_message=processing_text,
+        )
     else:
         # Try Groq LLM first; fall back to templates if unavailable
         try:

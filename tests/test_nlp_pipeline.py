@@ -225,6 +225,37 @@ class TestDialogueManager(unittest.TestCase):
         reply = dm.get_next_reply("u5")
         self.assertIn("0800", reply)
 
+    def test_update_state_sets_crisis_flag_on_keyword(self):
+        """
+        update_state must flag crisis on keyword match so the pipeline routes to
+        the template engine BEFORE deciding whether to call the LLM. Without this,
+        crisis messages reach the LLM whenever it is available.
+        """
+        dm = self._make_dm()
+        state = dm.update_state("u6", emotion="anger", confidence=0.8,
+                                message="I want to kill myself")
+        self.assertTrue(state["crisis_flag"])
+        self.assertIn("keyword", state.get("crisis_triggered_by", ""))
+
+    def test_update_state_no_crisis_flag_on_normal_message(self):
+        dm = self._make_dm()
+        state = dm.update_state("u7", emotion="anxiety", confidence=0.8,
+                                message="I am worried about my exam")
+        self.assertFalse(state["crisis_flag"])
+
+    def test_expanded_crisis_phrases_are_detected(self):
+        """Newly added distress phrases should also trigger the crisis path."""
+        dm = self._make_dm()
+        for i, phrase in enumerate([
+            "honestly i wish i was dead",
+            "i can't take it anymore",
+            "there is no point in living",
+            "i just want to disappear",
+        ]):
+            state = dm.update_state(f"crisis-{i}", emotion="sadness",
+                                    confidence=0.7, message=phrase)
+            self.assertTrue(state["crisis_flag"], f"missed crisis phrase: {phrase}")
+
 
 # ── 5. Integration: process_message ───────────────────────────────────────────
 
@@ -356,6 +387,26 @@ class TestProcessMessage(unittest.TestCase):
         self.assertTrue(result["language"]["input_translation_applied"])
         self.assertTrue(result["language"]["output_translation_applied"])
         self.assertIn("mimi", result["reply"])
+
+    def test_crisis_turn_never_calls_llm_even_when_available(self):
+        """
+        When the dialogue manager flags a crisis, the pipeline must use the
+        template engine and must NOT call the LLM, even if the LLM is healthy.
+        """
+        import services.nlp_pipeline as pm
+        from services.nlp_pipeline import process_message
+
+        # Simulate update_state flagging a crisis (as it now does on keywords).
+        self._mock_dm.update_state.return_value = {"crisis_flag": True}
+        self._mock_dm.get_next_reply.return_value = "CRISIS TEMPLATE with hotline 0800"
+
+        # Make the LLM "available" (returns a reply instead of raising).
+        with patch.object(pm, "generate_reply", return_value="LLM REPLY") as mock_llm:
+            result = process_message("I want to kill myself", user_id="u_crisis")
+
+        self.assertEqual(result["status_code"], 200)
+        self.assertIn("0800", result["reply"])
+        mock_llm.assert_not_called()
 
     def test_language_crisis_signal_forces_template_reply(self):
         import services.nlp_pipeline as pm
@@ -557,6 +608,88 @@ class TestSendEndpoint(unittest.TestCase):
         self.assertEqual(response.headers.get("Access-Control-Allow-Origin"), "https://compaass.vercel.app")
         self.assertIn("Content-Type", response.headers.get("Access-Control-Allow-Headers", ""))
         self.assertIn("POST", response.headers.get("Access-Control-Allow-Methods", ""))
+
+
+class TestAlertService(unittest.TestCase):
+
+    def setUp(self):
+        import services.alert_service as alert
+        self.alert = alert
+        self.AlertPayload = alert.AlertPayload
+
+    def _fake_settings(self, **overrides):
+        from types import SimpleNamespace
+        base = dict(
+            ENABLE_THERAPIST_ALERTS=True,
+            THERAPIST_ALERT_EMAIL="therapist@example.com",
+            ALERT_EMAIL_FROM="bot@example.com",
+            ALERT_APP_NAME="COMPASS",
+            ALERT_COOLDOWN_SECONDS=900,
+            SMTP_HOST="smtp.example.com",
+            SMTP_PORT=587,
+            SMTP_USERNAME="bot@example.com",
+            SMTP_PASSWORD="pw",
+            SMTP_USE_TLS=True,
+            SMTP_TIMEOUT_SECONDS=10.0,
+        )
+        base.update(overrides)
+        return SimpleNamespace(**base)
+
+    def test_build_alert_message_contains_key_details(self):
+        payload = self.AlertPayload(
+            user_id="sess-1", message="I want to end my life",
+            emotion="sadness", confidence=0.88,
+            triggered_by="keyword:end my life", language="en",
+        )
+        with patch.object(self.alert, "settings", self._fake_settings()):
+            subject, body = self.alert.build_alert_message(payload)
+        self.assertIn("sess-1", subject)
+        self.assertIn("I want to end my life", body)
+        self.assertIn("keyword:end my life", body)
+        self.assertIn("sadness", body)
+
+    def test_disabled_by_default_returns_false(self):
+        with patch.object(self.alert, "settings",
+                          self._fake_settings(ENABLE_THERAPIST_ALERTS=False)):
+            sent = self.alert.maybe_alert_therapist(
+                user_id="u", message="kill myself", emotion="sadness",
+                confidence=0.9, triggered_by="keyword")
+        self.assertFalse(sent)
+
+    def test_unconfigured_smtp_returns_false(self):
+        with patch.object(self.alert, "settings",
+                          self._fake_settings(SMTP_HOST="")):
+            sent = self.alert.maybe_alert_therapist(
+                user_id="u", message="kill myself", emotion="sadness",
+                confidence=0.9, triggered_by="keyword")
+        self.assertFalse(sent)
+
+    def test_dispatch_sends_email_via_smtp(self):
+        payload = self.AlertPayload(
+            user_id="u2", message="end my life", emotion="sadness",
+            confidence=0.9, triggered_by="keyword:end my life")
+        mock_server = MagicMock()
+        mock_ctx = MagicMock()
+        mock_ctx.__enter__.return_value = mock_server
+        with patch.object(self.alert, "settings", self._fake_settings()), \
+             patch.object(self.alert.smtplib, "SMTP", return_value=mock_ctx) as mock_smtp:
+            self.alert._dispatch(payload)
+        mock_smtp.assert_called_once()
+        mock_server.starttls.assert_called_once()
+        mock_server.login.assert_called_once_with("bot@example.com", "pw")
+        mock_server.send_message.assert_called_once()
+
+    def test_cooldown_dedupes_within_window(self):
+        """Second alert for the same user within the window is suppressed."""
+        with patch.object(self.alert, "settings",
+                          self._fake_settings(ALERT_COOLDOWN_SECONDS=900)):
+            self.alert._recent_alerts.clear()
+            # Force the Redis path to fail so the in-process fallback is exercised.
+            with patch("utils.redis_pool.get_redis", side_effect=Exception("no redis")):
+                first = self.alert._should_send("user-cd")
+                second = self.alert._should_send("user-cd")
+        self.assertTrue(first)
+        self.assertFalse(second)
 
 
 if __name__ == "__main__":
