@@ -29,7 +29,7 @@ class Settings:
     PORT: int = field(default_factory=lambda: int(os.getenv("PORT", 5000)))
     FRONTEND_ORIGINS: tuple[str, ...] = field(default_factory=lambda: _csv_env(
         "FRONTEND_ORIGINS",
-        "http://localhost:3000,https://compass-two-iota.vercel.app,https://compaass.vercel.app",
+        "http://localhost:3000,https://compass-two-iota.vercel.app,https://compaass.vercel.app,https://compass-seven-rho.vercel.app",
     ))
 
     # ── MongoDB ────────────────────────────────────────────────────────────

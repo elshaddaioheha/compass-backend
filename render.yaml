@@ -67,7 +67,7 @@ services:
       - key: PORT
         value: "10000"
       - key: FRONTEND_ORIGINS
-        value: http://localhost:3000,https://compass-two-iota.vercel.app,https://compaass.vercel.app
+        value: http://localhost:3000,https://compass-two-iota.vercel.app,https://compaass.vercel.app,https://compass-seven-rho.vercel.app
 
       # ── NLP ───────────────────────────────────────────────────────────────
       - key: SPACY_MODEL
